@@ -1,0 +1,137 @@
+#user  nobody;
+worker_processes  1;
+
+#error_log  logs/error.log;
+#error_log  logs/error.log  notice;
+#error_log  logs/error.log  info;
+
+#pid        logs/nginx.pid;
+
+
+events {
+    worker_connections  1024;
+}
+
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+
+    #log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+    #                  '$status $body_bytes_sent "$http_referer" '
+    #                  '"$http_user_agent" "$http_x_forwarded_for"';
+
+    #access_log  logs/access.log  main;
+
+    sendfile        on;
+    #tcp_nopush     on;
+
+    #keepalive_timeout  0;
+    keepalive_timeout  65;
+
+    #gzip  on;
+
+
+    resolver 8.8.8.8;
+
+   server {
+        listen 127.0.0.1:8999;
+        client_body_buffer_size 128k;
+        client_max_body_size 128k;
+
+        location / {
+            content_by_lua_block {
+                auto_ssl:hook_server()
+        } 
+    }
+   }
+
+    server {
+        listen       80;
+        server_name  kevinonboardingtasks.davidhsu.tw;
+
+        #charset koi8-r;
+
+        #access_log  logs/host.access.log  main;
+
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+
+        #error_page  404              /404.html;
+
+        # redirect server error pages to the static page /50x.html
+        #
+        error_page   500 502 503 504  /50x.html;
+        location = /50x.html {
+            root   html;
+        }
+
+        location /.well-known/acme-challenge/ {
+            content_by_lua_block {
+                auto_ssl:challenge_server()
+            } 
+        }
+    }
+
+
+lua_shared_dict auto_ssl 50m;
+lua_shared_dict auto_ssl_settings 64k;
+
+# A DNS resolver must be defined for OCSP stapling to function.
+# disable IPv6 to prevent this issue https://github.com/GUI/lua-resty-auto-ssl/issues/12
+
+
+# Initial setup tasks.
+init_by_lua_block {
+    auto_ssl = (require "resty.auto-ssl").new()
+
+    -- Define a function to determine which SNI domains to automatically handle
+    -- and register new certificates for. Defaults to not allowing any domains,
+    -- so this must be configured.
+    auto_ssl:set("allow_domain", function(domain)
+    return true
+    end)
+
+    -- default value 1 day
+    auto_ssl:set("renew_check_interval", 86400)
+    auto_ssl:init()
+}
+
+init_worker_by_lua_block {
+    auto_ssl:init_worker()
+}
+
+
+    server {
+        listen 443 ssl;
+        server_name kevinonboardingtasks.davidhsu.tw;
+
+        ssl_certificate_by_lua_block {
+            auto_ssl:ssl_certificate()
+        }
+
+        ssl_certificate /etc/ssl/resty-auto-ssl-fallback.crt;
+        ssl_certificate_key /etc/ssl/resty-auto-ssl-fallback.key;
+
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+
+        keepalive_timeout 0;
+
+        ssl_stapling    on;
+
+
+        ssl_session_timeout 1d;
+        ssl_session_cache shared:SSL:50m;
+        ssl_session_tickets off;
+
+        ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+
+    
+    }
+
+}
